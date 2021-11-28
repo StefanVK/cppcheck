@@ -137,6 +137,7 @@ private:
         TEST_CASE(test_isVariableDeclarationIdentifiesScopedStdDeclaration);
         TEST_CASE(test_isVariableDeclarationIdentifiesManyScopes);
         TEST_CASE(test_isVariableDeclarationIdentifiesPointers);
+        TEST_CASE(test_isVariableDeclarationIdentifiesPointers2);
         TEST_CASE(test_isVariableDeclarationDoesNotIdentifyConstness);
         TEST_CASE(test_isVariableDeclarationIdentifiesFirstOfManyVariables);
         TEST_CASE(test_isVariableDeclarationIdentifiesScopedPointerDeclaration);
@@ -352,6 +353,7 @@ private:
         TEST_CASE(symboldatabase93); // alignas attribute
         TEST_CASE(symboldatabase94); // structured bindings
         TEST_CASE(symboldatabase95); // #10295
+        TEST_CASE(symboldatabase96); // #10126
 
         TEST_CASE(createSymbolDatabaseFindAllScopes1);
         TEST_CASE(createSymbolDatabaseFindAllScopes2);
@@ -653,6 +655,18 @@ private:
         ASSERT(true == v3.isPointer());
         ASSERT(true == v3.isConst());
         ASSERT(false == v3.isReference());
+    }
+
+    void test_isVariableDeclarationIdentifiesPointers2() {
+
+        GET_SYMBOL_DB("void slurpInManifest() {\n"
+                      "  std::string tmpiostring(*tI);\n"
+                      "  if(tmpiostring==\"infoonly\"){}\n"
+                      "}");
+
+        const Token *tok = Token::findsimplematch(tokenizer.tokens(), "tmpiostring ==");
+        ASSERT(tok->variable());
+        ASSERT(!tok->variable()->isPointer());
     }
 
     void test_isVariableDeclarationDoesNotIdentifyConstness() {
@@ -4794,6 +4808,14 @@ private:
         ASSERT(functok->function()->name() == "foo2");
     }
 
+    void symboldatabase96() { // #10126
+        GET_SYMBOL_DB("struct A {\n"
+                      "    int i, j;\n"
+                      "};\n"
+                      "std::map<int, A> m{ { 0, A{0,0} }, {0, A{0,0} } };\n");
+        ASSERT_EQUALS("", errout.str());
+    }
+
     void createSymbolDatabaseFindAllScopes1() {
         GET_SYMBOL_DB("void f() { union {int x; char *p;} a={0}; }");
         ASSERT(db->scopeList.size() == 3);
@@ -7521,12 +7543,21 @@ private:
         // auto variables
         ASSERT_EQUALS("signed int", typeOf("; auto x = 3;", "x"));
         ASSERT_EQUALS("signed int *", typeOf("; auto *p = (int *)0;", "p"));
+        ASSERT_EQUALS("const signed int *", typeOf("; auto *p = (const int *)0;", "p"));
+        ASSERT_EQUALS("const signed int *", typeOf("; auto *p = (constexpr int *)0;", "p"));
+        ASSERT_EQUALS("const signed int *", typeOf("; const auto *p = (int *)0;", "p"));
+        ASSERT_EQUALS("const signed int *", typeOf("; constexpr auto *p = (int *)0;", "p"));
+        ASSERT_EQUALS("const signed int *", typeOf("; const auto *p = (const int *)0;", "p"));
+        ASSERT_EQUALS("const signed int *", typeOf("; constexpr auto *p = (constexpr int *)0;", "p"));
+        ASSERT_EQUALS("const signed int *", typeOf("; const constexpr auto *p = (int *)0;", "p"));
         ASSERT_EQUALS("signed int *", typeOf("; auto data = new int[100];", "data"));
         ASSERT_EQUALS("signed int", typeOf("; auto data = new X::Y; int x=1000; x=x/5;", "/")); // #7970
         ASSERT_EQUALS("signed int *", typeOf("; auto data = new (nothrow) int[100];", "data"));
         ASSERT_EQUALS("signed int *", typeOf("; auto data = new (std::nothrow) int[100];", "data"));
         ASSERT_EQUALS("const signed short", typeOf("short values[10]; void f() { for (const auto *x : values); }", "x"));
         ASSERT_EQUALS("const signed int", typeOf("; const auto x = 3;", "x"));
+        ASSERT_EQUALS("const signed int", typeOf("; constexpr auto x = 3;", "x"));
+        ASSERT_EQUALS("const signed int", typeOf("; const constexpr auto x = 3;", "x"));
 
         // Variable declaration
         ASSERT_EQUALS("char *", typeOf("; char abc[] = \"abc\";", "["));

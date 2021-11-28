@@ -22,14 +22,15 @@
 #include "config.h"
 #include "ctu.h"
 #include "library.h"
+#include "preprocessor.h"
 #include "settings.h"
 #include "testsuite.h"
 #include "tokenize.h"
 
-#include <tinyxml2.h>
 #include <list>
+#include <simplecpp.h>
 #include <string>
-
+#include <tinyxml2.h>
 
 class TestBufferOverrun : public TestFixture {
 public:
@@ -65,6 +66,45 @@ private:
         // Check for buffer overruns..
         CheckBufferOverrun checkBufferOverrun(&tokenizer, &settings, this);
         checkBufferOverrun.runChecks(&tokenizer, &settings, this);
+    }
+
+    void checkP(const char code[], const char* filename = "test.cpp")
+    {
+        // Clear the error buffer..
+        errout.str("");
+
+        Settings* settings = &settings0;
+        settings->severity.enable(Severity::style);
+        settings->severity.enable(Severity::warning);
+        settings->severity.enable(Severity::portability);
+        settings->severity.enable(Severity::performance);
+        settings->standards.c = Standards::CLatest;
+        settings->standards.cpp = Standards::CPPLatest;
+        settings->certainty.enable(Certainty::inconclusive);
+        settings->certainty.disable(Certainty::experimental);
+
+        // Raw tokens..
+        std::vector<std::string> files(1, filename);
+        std::istringstream istr(code);
+        const simplecpp::TokenList tokens1(istr, files, files[0]);
+
+        // Preprocess..
+        simplecpp::TokenList tokens2(files);
+        std::map<std::string, simplecpp::TokenList*> filedata;
+        simplecpp::preprocess(tokens2, tokens1, files, filedata, simplecpp::DUI());
+
+        Preprocessor preprocessor(*settings, nullptr);
+        preprocessor.setDirectives(tokens1);
+
+        // Tokenizer..
+        Tokenizer tokenizer(settings, this);
+        tokenizer.createTokens(std::move(tokens2));
+        tokenizer.simplifyTokens1("");
+        tokenizer.setPreprocessor(&preprocessor);
+
+        // Check for buffer overruns..
+        CheckBufferOverrun checkBufferOverrun(&tokenizer, settings, this);
+        checkBufferOverrun.runChecks(&tokenizer, settings, this);
     }
 
     void run() OVERRIDE {
@@ -136,6 +176,7 @@ private:
         TEST_CASE(array_index_57); // #10023
         TEST_CASE(array_index_58); // #7524
         TEST_CASE(array_index_59); // #10413
+        TEST_CASE(array_index_60); // #10617, #9824
         TEST_CASE(array_index_multidim);
         TEST_CASE(array_index_switch_in_for);
         TEST_CASE(array_index_for_in_for);   // FP: #2634
@@ -1663,6 +1704,29 @@ private:
               "  return a[b];\n"
               "}\n");
         ASSERT_EQUALS("", errout.str());
+    }
+
+    void array_index_60()
+    {
+        checkP("#define CKR(B) if (!(B)) { return -1; }\n"
+               "int f(int i) {\n"
+               "  const int A[3] = {};\n"
+               "  CKR(i < 3);\n"
+               "  if (i > 0)\n"
+               "      i = A[i];\n"
+               "  return i;\n"
+               "}\n");
+        ASSERT_EQUALS("", errout.str());
+
+        checkP("#define ASSERT(expression, action) if (expression) {action;}\n"
+               "int array[5];\n"
+               "void func (int index) {\n"
+               "    ASSERT(index > 5, return);\n"
+               "    array[index]++;\n"
+               "}\n");
+        ASSERT_EQUALS(
+            "[test.cpp:4] -> [test.cpp:5]: (warning) Either the condition 'index>5' is redundant or the array 'array[5]' is accessed at index 5, which is out of bounds.\n",
+            errout.str());
     }
 
     void array_index_multidim() {
@@ -3385,6 +3449,20 @@ private:
               "  cache[i][0xFFFF] = 0;\n"
               "}");
         ASSERT_EQUALS("", errout.str());
+
+        check("void f() {\n"
+              "  int **a = malloc(2 * sizeof(int*));\n"
+              "  for (int i = 0; i < 3; i++)\n"
+              "    a[i] = NULL;\n"
+              "}");
+        ASSERT_EQUALS("[test.cpp:3] -> [test.cpp:4]: (error) Array 'a[2]' accessed at index 2, which is out of bounds.\n", errout.str());
+
+        check("void f() {\n"
+              "  int **a = new int*[2];\n"
+              "  for (int i = 0; i < 3; i++)\n"
+              "    a[i] = NULL;\n"
+              "}");
+        TODO_ASSERT_EQUALS("[test.cpp:3] -> [test.cpp:4]: (error) Array 'a[2]' accessed at index 2, which is out of bounds.\n", "", errout.str());
     }
 
     // statically allocated buffer
@@ -4736,6 +4814,38 @@ private:
               "    int single_value = 0;\n"
               "    return foo(1, &single_value);\n"
               "}\n");
+        ASSERT_EQUALS("", errout.str());
+
+        check("void f(const char* app, size_t applen) {\n" // #10137
+              "    char* tmp_de = NULL;\n"
+              "    char** str = &tmp_de;\n"
+              "    char* tmp = (char*)realloc(*str, applen + 1);\n"
+              "    if (tmp) {\n"
+              "        *str = tmp;\n"
+              "        memcpy(*str, app, applen);\n"
+              "        (*str)[applen] = '\\0';\n"
+              "    }\n"
+              "    free(*str);\n"
+              "}\n", "test.c");
+        ASSERT_EQUALS("", errout.str());
+
+        check("template <typename T, unsigned N>\n"
+              "using vector = Eigen::Matrix<T, N, 1>;\n"
+              "template <typename V>\n"
+              "void scharr(image2d<vector<V, 2>>& out) {\n"
+              "    vector<V, 2>* out_row = &out(r, 0);\n"
+              "    out_row[c] = vector<V, 2>(1,2);\n"
+              "}\n");
+        ASSERT_EQUALS("", errout.str());
+
+        check("void f(const uint8_t* d, const uint8_t L) {\n" // #10092
+              "    for (uint8_t i = 0U; i < L; ++i)\n"
+              "        g(d[i]);\n"
+              "}\n"
+              "void h() {\n"
+              "    const uint8_t u = 4;\n"
+              "    f(&u, N);\n"
+              "}");
         ASSERT_EQUALS("", errout.str());
     }
 };

@@ -40,6 +40,7 @@ private:
         LOAD_LIB_2(settings.library, "std.cfg");
 
         TEST_CASE(outOfBounds);
+        TEST_CASE(outOfBoundsSymbolic);
         TEST_CASE(outOfBoundsIndexExpression);
         TEST_CASE(outOfBoundsIterator);
 
@@ -355,7 +356,7 @@ private:
                     "    if(v.at(b?42:0)) {}\n"
                     "}\n");
         ASSERT_EQUALS(
-            "test.cpp:3:error:Out of bounds access in expression 'v.at(b?42:0)' because 'v' is empty and 'at' may be non-zero.\n",
+            "test.cpp:3:error:Out of bounds access in expression 'v.at(b?42:0)' because 'v' is empty and 'b?42:0' may be non-zero.\n",
             errout.str());
 
         checkNormal("void f(std::vector<int> v, bool b){\n"
@@ -363,7 +364,7 @@ private:
                     "        if(v.at(b?42:0)) {}\n"
                     "}\n");
         ASSERT_EQUALS(
-            "test.cpp:3:warning:Either the condition 'v.size()==1' is redundant or v size can be 1. Expression 'v.at' cause access out of bounds.\n"
+            "test.cpp:3:warning:Either the condition 'v.size()==1' is redundant or v size can be 1. Expression 'v.at(b?42:0)' cause access out of bounds.\n"
             "test.cpp:2:note:condition 'v.size()==1'\n"
             "test.cpp:3:note:Access out of bounds\n",
             errout.str());
@@ -528,7 +529,8 @@ private:
                     "    std::vector<int> * pv = &v;\n"
                     "    return (*pv).at(42);\n"
                     "}\n");
-        ASSERT_EQUALS("test.cpp:4:error:Out of bounds access in expression '(*pv).at(42)' because '*pv' is empty and 'at' may be non-zero.\n", errout.str());
+        ASSERT_EQUALS("test.cpp:4:error:Out of bounds access in expression '(*pv).at(42)' because '*pv' is empty.\n",
+                      errout.str());
 
         checkNormal("std::string f(const char* DirName) {\n"
                     "  if (DirName == nullptr)\n"
@@ -643,6 +645,35 @@ private:
                     "        v[i] = 1;\n"
                     "}\n");
         ASSERT_EQUALS("", errout.str());
+
+        checkNormal("void f(std::vector<int>& v, int i) {\n"
+                    "    if (i > -1) {\n"
+                    "        v.erase(v.begin() + i);\n"
+                    "        if (v.empty()) {}\n"
+                    "    }\n"
+                    "}\n");
+        ASSERT_EQUALS("", errout.str());
+
+        checkNormal("void g(const char *, ...) { exit(1); }\n" // #10025
+                    "void f(const char c[]) {\n"
+                    "    std::vector<int> v = get();\n"
+                    "    if (v.empty())\n"
+                    "        g(\"\", c[0]);\n"
+                    "    return h(&v[0], v.size()); \n"
+                    "}\n");
+        ASSERT_EQUALS("", errout.str());
+    }
+
+    void outOfBoundsSymbolic()
+    {
+        check("void foo(std::string textline, int col) {\n"
+              "    if(col > textline.size())\n"
+              "        return false;\n"
+              "    int x = textline[col];\n"
+              "}\n");
+        ASSERT_EQUALS(
+            "[test.cpp:2] -> [test.cpp:4]: (warning) Either the condition 'col>textline.size()' is redundant or 'col' can have the value textline.size(). Expression 'textline[col]' cause access out of bounds.\n",
+            errout.str());
     }
 
     void outOfBoundsIndexExpression() {
@@ -1516,21 +1547,24 @@ private:
               "void foo() {\n"
               "    (void)std::find(f().begin(), g().end(), 0);\n"
               "}");
-        ASSERT_EQUALS("[test.cpp:4]: (warning) Iterators to containers from different expressions 'f()' and 'g()' are used together.\n", errout.str());
+        ASSERT_EQUALS("[test.cpp:4]: (error) Iterators of different containers 'f()' and 'g()' are used together.\n",
+                      errout.str());
 
         check("std::vector<int>& f();\n"
               "std::vector<int>& g();\n"
               "void foo() {\n"
               "    if(f().begin() == g().end()) {}\n"
               "}");
-        ASSERT_EQUALS("[test.cpp:4]: (warning) Iterators to containers from different expressions 'f()' and 'g()' are used together.\n", errout.str());
+        ASSERT_EQUALS("[test.cpp:4]: (error) Iterators of different containers 'f()' and 'g()' are used together.\n",
+                      errout.str());
 
         check("std::vector<int>& f();\n"
               "std::vector<int>& g();\n"
               "void foo() {\n"
               "    auto size = f().end() - g().begin();\n"
               "}");
-        ASSERT_EQUALS("[test.cpp:4]: (warning) Iterators to containers from different expressions 'f()' and 'g()' are used together.\n", errout.str());
+        ASSERT_EQUALS("[test.cpp:4]: (error) Iterators of different containers 'f()' and 'g()' are used together.\n",
+                      errout.str());
 
         check("struct A {\n"
               "    std::vector<int>& f();\n"
@@ -1576,7 +1610,7 @@ private:
         check("std::vector<int>& f();\n"
               "std::vector<int>& g();\n"
               "void foo() {\n"
-              "    auto it = f().end();\n"
+              "    auto it = f().end() - 1;\n"
               "    f().begin() - it\n"
               "    f().begin()+1 - it\n"
               "    f().begin() - (it + 1)\n"
@@ -1596,7 +1630,7 @@ private:
               "    (void)std::find(begin(f()), end(f()) - 1, 0);\n"
               "    (void)std::find(begin(f()) + 1, end(f()) - 1, 0);\n"
               "}");
-        ASSERT_EQUALS("", errout.str());
+        ASSERT_EQUALS("[test.cpp:10]: (error) Dereference of an invalid iterator: f().end()+1\n", errout.str());
 
         check("std::vector<int>& f();\n"
               "std::vector<int>& g();\n"
@@ -1606,7 +1640,9 @@ private:
               "    if(f().begin()+1 == f().end()) {}\n"
               "    if(f().begin()+1 == f().end()+1) {}\n"
               "}");
-        ASSERT_EQUALS("", errout.str());
+        ASSERT_EQUALS("[test.cpp:5]: (error) Dereference of an invalid iterator: f().end()+1\n"
+                      "[test.cpp:7]: (error) Dereference of an invalid iterator: f().end()+1\n",
+                      errout.str());
 
         check("template<int N>\n"
               "std::vector<int>& f();\n"
@@ -1629,6 +1665,15 @@ private:
         check("void foo() {\n"
               "    if(f().begin(1) == f().end()) {}\n"
               "}");
+        ASSERT_EQUALS("", errout.str());
+
+        check("void foo(const uint8_t* data, const uint32_t dataLength) {\n"
+              "    const uint32_t minimumLength = sizeof(uint16_t) + sizeof(uint16_t);\n"
+              "    if (dataLength >= minimumLength) {\n"
+              "        char* payload = new char[dataLength - minimumLength];\n"
+              "        std::copy(&data[minimumLength], &data[dataLength], payload);\n"
+              "    }\n"
+              "}\n");
         ASSERT_EQUALS("", errout.str());
     }
 
@@ -1712,6 +1757,15 @@ private:
               "                           [](auto i) { return i == 0; });\n"
               "    if (it != a.end()) {}\n"
               "  }\n"
+              "}\n");
+        ASSERT_EQUALS("", errout.str());
+
+        // #10604
+        check("struct S {\n"
+              "    std::vector<int> v;\n"
+              "};\n"
+              "void f(S& s, int m) {\n"
+              "    s.v.erase(s.v.begin() + m);\n"
               "}\n");
         ASSERT_EQUALS("", errout.str());
     }
@@ -1824,8 +1878,9 @@ private:
               "       foo[ii] = 0;\n"
               "    }\n"
               "}");
-        ASSERT_EQUALS("[test.cpp:6]: (error) Out of bounds access in expression 'foo[ii]' because 'foo' is empty.\n"
-                      "[test.cpp:6]: (error) When ii==foo.size(), foo[ii] is out of bounds.\n", errout.str());
+        ASSERT_EQUALS(
+            "[test.cpp:6]: (error) Out of bounds access in expression 'foo[ii]' because 'foo' is empty and 'ii' may be non-zero.\n",
+            errout.str());
 
         check("void foo(std::vector<int> foo) {\n"
               "    for (unsigned int ii = 0; ii <= foo.size(); ++ii) {\n"
@@ -1928,7 +1983,9 @@ private:
                   "        }\n"
                   "    }\n"
                   "}");
-            ASSERT_EQUALS("[test.cpp:11]: (error) Out of bounds access in expression 'foo[ii]' because 'foo' is empty.\n", errout.str());
+            ASSERT_EQUALS(
+                "[test.cpp:11]: (error) Out of bounds access in expression 'foo[ii]' because 'foo' is empty and 'ii' may be non-zero.\n",
+                errout.str());
         }
 
         {
@@ -2912,28 +2969,21 @@ private:
         // ok (array-like pointer)
         check("void f(std::set<int> *s)\n"
               "{\n"
-              "    if (s[0].find(12) != s.end()) { }\n"
+              "    if (s[0].find(12) != s->end()) { }\n"
               "}");
         ASSERT_EQUALS("", errout.str());
 
         // ok (array)
         check("void f(std::set<int> s [10])\n"
               "{\n"
-              "    if (s[0].find(123) != s.end()) { }\n"
+              "    if (s[0].find(123) != s->end()) { }\n"
               "}");
         ASSERT_EQUALS("", errout.str());
 
         // ok (undefined length array)
         check("void f(std::set<int> s [])\n"
               "{\n"
-              "    if (s[0].find(123) != s.end()) { }\n"
-              "}");
-        ASSERT_EQUALS("", errout.str());
-
-        // ok (vector)
-        check("void f(std::vector<std::set<int> > s)\n"
-              "{\n"
-              "    if (s[0].find(123) != s.end()) { }\n"
+              "    if (s[0].find(123) != s->end()) { }\n"
               "}");
         ASSERT_EQUALS("", errout.str());
 
@@ -4875,6 +4925,18 @@ private:
               "    cb[i] = b[i];\n"
               "}\n",true);
         ASSERT_EQUALS("", errout.str());
+
+        // #9836
+        check("void f() {\n"
+              "    auto v = std::vector<std::vector<std::string> >{ std::vector<std::string>{ \"hello\" } };\n"
+              "    auto p = &(v.at(0).at(0));\n"
+              "    v.clear();\n"
+              "    std::cout << *p << std::endl;\n"
+              "}\n",
+              true);
+        ASSERT_EQUALS(
+            "[test.cpp:3] -> [test.cpp:3] -> [test.cpp:3] -> [test.cpp:4] -> [test.cpp:2] -> [test.cpp:5]: (error) Using pointer to local variable 'v' that may be invalid.\n",
+            errout.str());
     }
 
     void invalidContainerLoop() {

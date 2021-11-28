@@ -1317,7 +1317,8 @@ private:
                "  for (x = a; x < 50; x++) {}\n"
                "  b = x;\n"
                "}\n";
-        ASSERT_EQUALS("3,After for loop, x has value 50\n",
+        ASSERT_EQUALS("3,Assuming that condition 'x<50' is not redundant\n"
+                      "3,Assuming that condition 'x<50' is not redundant\n",
                       getErrorPathForX(code, 4U));
     }
 
@@ -4443,6 +4444,22 @@ private:
         ASSERT(value.isKnown());
         ASSERT_EQUALS(1, value.intvalue);
 
+        code = "bool f() {\n"
+               "  const int s = int{};"
+               "  return s == 0;\n" // <- known value
+               "}";
+        value = valueOfTok(code, "==");
+        TODO_ASSERT_EQUALS(true, false, value.isKnown());
+        TODO_ASSERT_EQUALS(1, 0, value.intvalue);
+
+        code = "bool f() {\n"
+               "  const int s = int();"
+               "  return s == 0;\n" // <- known value
+               "}";
+        value = valueOfTok(code, "==");
+        TODO_ASSERT_EQUALS(true, false, value.isKnown());
+        TODO_ASSERT_EQUALS(1, 0, value.intvalue);
+
         // calculation with known result
         code = "int f(int x) { a = x & 0; }"; // <- & is 0
         value = valueOfTok(code, "&");
@@ -5801,6 +5818,15 @@ private:
                "    return v;\n"
                "}\n";
         ASSERT_EQUALS(true, tokenValues(code, "v [ 0 ] != 0 ) { }", ValueFlow::Value::ValueType::CONTAINER_SIZE).empty());
+
+        code = "std::vector<int> f() {\n"
+               "    std::vector<int> v;\n"
+               "    v.reserve(1);\n"
+               "    v[1] = 42;\n"
+               "    return v;\n"
+               "}\n";
+        ASSERT_EQUALS(
+            "", isKnownContainerSizeValue(tokenValues(code, "v [", ValueFlow::Value::ValueType::CONTAINER_SIZE), 0));
     }
 
     void valueFlowDynamicBufferSize() {
@@ -6074,6 +6100,13 @@ private:
                "    diff = (buf-b);\n"
                "}\n";
         valueOfTok(code, "diff");
+
+        code = "void foo() {\n" // #10462
+               "  std::tuple<float, float, float, float> t4(5.2f, 3.1f, 2.4f, 9.1f), t5(4, 6, 9, 27);\n"
+               "  t4 = t5;\n"
+               "  ASSERT(!(t4 < t5) && t4 <= t5);\n"
+               "}";
+        valueOfTok(code, "<=");
     }
 
     void valueFlowHang() {
@@ -6646,6 +6679,14 @@ private:
                "}\n";
         ASSERT_EQUALS(true, testValueOfX(code, 11U, "d", 0));
         ASSERT_EQUALS(false, testValueOfXImpossible(code, 11U, 0));
+
+        code = "void f(int * p, int len) {\n"
+               "    for(int x = 0; x < len; ++x) {\n"
+               "        p[x] = 1;\n"
+               "    }\n"
+               "}\n";
+        ASSERT_EQUALS(true, testValueOfX(code, 3U, "len", -1));
+        ASSERT_EQUALS(true, testValueOfXImpossible(code, 3U, "len", 0));
     }
 
     void valueFlowSymbolicIdentity()

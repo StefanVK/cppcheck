@@ -53,10 +53,10 @@ void visitAstNodesGeneric(T *ast, std::function<ChildrenToVisit(T *)> visitor)
 
         if (c == ChildrenToVisit::done)
             break;
-        if (c == ChildrenToVisit::op1 || c == ChildrenToVisit::op1_and_op2)
-            tokens.push(tok->astOperand1());
         if (c == ChildrenToVisit::op2 || c == ChildrenToVisit::op1_and_op2)
             tokens.push(tok->astOperand2());
+        if (c == ChildrenToVisit::op1 || c == ChildrenToVisit::op1_and_op2)
+            tokens.push(tok->astOperand1());
     }
 }
 
@@ -595,6 +595,38 @@ static T* getCondTokFromEndImpl(T* endBlock)
     return nullptr;
 }
 
+template<class T, REQUIRES("T must be a Token class", std::is_convertible<T*, const Token*> )>
+static T* getInitTokImpl(T* tok)
+{
+    if (!tok)
+        return nullptr;
+    if (Token::Match(tok, "%name% ("))
+        return getInitTokImpl(tok->next());
+    if (tok->str() != "(")
+        return nullptr;
+    if (!Token::simpleMatch(tok->astOperand2(), ";"))
+        return nullptr;
+    if (Token::simpleMatch(tok->astOperand2()->astOperand1(), ";"))
+        return nullptr;
+    return tok->astOperand2()->astOperand1();
+}
+
+template<class T, REQUIRES("T must be a Token class", std::is_convertible<T*, const Token*> )>
+static T* getStepTokImpl(T* tok)
+{
+    if (!tok)
+        return nullptr;
+    if (Token::Match(tok, "%name% ("))
+        return getStepTokImpl(tok->next());
+    if (tok->str() != "(")
+        return nullptr;
+    if (!Token::simpleMatch(tok->astOperand2(), ";"))
+        return nullptr;
+    if (!Token::simpleMatch(tok->astOperand2()->astOperand2(), ";"))
+        return nullptr;
+    return tok->astOperand2()->astOperand2()->astOperand2();
+}
+
 Token* getCondTok(Token* tok)
 {
     return getCondTokImpl(tok);
@@ -611,6 +643,20 @@ Token* getCondTokFromEnd(Token* endBlock)
 const Token* getCondTokFromEnd(const Token* endBlock)
 {
     return getCondTokFromEndImpl(endBlock);
+}
+
+Token* getInitTok(Token* tok) {
+    return getInitTokImpl(tok);
+}
+const Token* getInitTok(const Token* tok) {
+    return getInitTokImpl(tok);
+}
+
+Token* getStepTok(Token* tok) {
+    return getStepTokImpl(tok);
+}
+const Token* getStepTok(const Token* tok) {
+    return getStepTokImpl(tok);
 }
 
 const Token *findNextTokenFromBreak(const Token *breakToken)
@@ -688,11 +734,25 @@ static bool isInLoopCondition(const Token * tok)
 /// If tok2 comes after tok1
 bool precedes(const Token * tok1, const Token * tok2)
 {
+    if (tok1 == tok2)
+        return false;
     if (!tok1)
         return false;
     if (!tok2)
         return true;
     return tok1->index() < tok2->index();
+}
+
+/// If tok1 comes after tok2
+bool succedes(const Token* tok1, const Token* tok2)
+{
+    if (tok1 == tok2)
+        return false;
+    if (!tok1)
+        return false;
+    if (!tok2)
+        return true;
+    return tok1->index() > tok2->index();
 }
 
 bool isAliasOf(const Token *tok, nonneg int varid, bool* inconclusive)
@@ -751,18 +811,20 @@ bool exprDependsOnThis(const Token* expr, bool onVar, nonneg int depth)
         return true;
     ++depth;
     // calling nonstatic method?
-    if (Token::Match(expr->previous(), "!!:: %name% (") && expr->function() && expr->function()->nestedIn && expr->function()->nestedIn->isClassOrStruct()) {
+    if (Token::Match(expr->previous(), "!!:: %name% (") && expr->function() && expr->function()->nestedIn &&
+        expr->function()->nestedIn->isClassOrStruct()) {
         // is it a method of this?
         const Scope* fScope = expr->scope();
         while (!fScope->functionOf && fScope->nestedIn)
             fScope = fScope->nestedIn;
-        const Scope* nestedIn = fScope->functionOf;
-        if (nestedIn && nestedIn->function)
-            nestedIn = nestedIn->function->token->scope();
-        while (nestedIn && nestedIn != expr->function()->nestedIn) {
-            nestedIn = nestedIn->nestedIn;
-        }
-        return nestedIn == expr->function()->nestedIn;
+
+        const Scope* classScope = fScope->functionOf;
+        if (classScope && classScope->function)
+            classScope = classScope->function->token->scope();
+
+        if (classScope && classScope->isClassOrStruct())
+            return contains(classScope->findAssociatedScopes(), expr->function()->nestedIn);
+        return false;
     } else if (onVar && Token::Match(expr, "%var%") && expr->variable()) {
         const Variable* var = expr->variable();
         return (var->isPrivate() || var->isPublic() || var->isProtected());
@@ -1817,11 +1879,12 @@ bool isScopeBracket(const Token* tok)
     return false;
 }
 
-const Token * getTokenArgumentFunction(const Token * tok, int& argn)
+template<class T, REQUIRES("T must be a Token class", std::is_convertible<T*, const Token*> )>
+T* getTokenArgumentFunctionImpl(T* tok, int& argn)
 {
     argn = -1;
     {
-        const Token *parent = tok->astParent();
+        T* parent = tok->astParent();
         if (parent && parent->isUnaryOp("&"))
             parent = parent->astParent();
         while (parent && parent->isCast())
@@ -1843,7 +1906,7 @@ const Token * getTokenArgumentFunction(const Token * tok, int& argn)
             return nullptr;
     }
 
-    const Token* argtok = tok;
+    T* argtok = tok;
     while (argtok && argtok->astParent() && (!Token::Match(argtok->astParent(), ",|(|{") || argtok->astParent()->isCast())) {
         argtok = argtok->astParent();
     }
@@ -1885,6 +1948,14 @@ const Token * getTokenArgumentFunction(const Token * tok, int& argn)
     if (!Token::Match(tok, "%name%|(|{"))
         return nullptr;
     return tok;
+}
+
+const Token* getTokenArgumentFunction(const Token* tok, int& argn) {
+    return getTokenArgumentFunctionImpl(tok, argn);
+}
+
+Token* getTokenArgumentFunction(Token* tok, int& argn) {
+    return getTokenArgumentFunctionImpl(tok, argn);
 }
 
 std::vector<const Variable*> getArgumentVars(const Token* tok, int argnr)
