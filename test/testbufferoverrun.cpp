@@ -39,7 +39,8 @@ public:
 private:
     Settings settings0;
 
-    void check(const char code[], const char filename[] = "test.cpp") {
+#define check(...) check_(__FILE__, __LINE__, __VA_ARGS__)
+    void check_(const char* file, int line, const char code[], const char filename[] = "test.cpp") {
         // Clear the error buffer..
         errout.str("");
 
@@ -48,17 +49,17 @@ private:
         // Tokenize..
         Tokenizer tokenizer(&settings0, this);
         std::istringstream istr(code);
-        tokenizer.tokenize(istr, filename);
+        ASSERT_LOC(tokenizer.tokenize(istr, filename), file, line);
 
         // Check for buffer overruns..
         CheckBufferOverrun checkBufferOverrun;
         checkBufferOverrun.runChecks(&tokenizer, &settings0, this);
     }
 
-    void check(const char code[], const Settings &settings, const char filename[] = "test.cpp") {
+    void check_(const char* file, int line, const char code[], const Settings &settings, const char filename[] = "test.cpp") {
         Tokenizer tokenizer(&settings, this);
         std::istringstream istr(code);
-        tokenizer.tokenize(istr, filename);
+        ASSERT_LOC(tokenizer.tokenize(istr, filename), file, line);
 
         // Clear the error buffer..
         errout.str("");
@@ -2100,6 +2101,18 @@ private:
               "    }\n"
               "}");
         ASSERT_EQUALS("[test.cpp:5]: (error) Array 'data[2]' accessed at index 10, which is out of bounds.\n", errout.str());
+
+        check("int f() {\n" // #9126
+              "    int i, c;\n"
+              "    char* words[100] = {0};\n"
+              "    g(words);\n"
+              "    for (i = c = 0; (i < N) && (c < 1); i++) {\n"
+              "        if (words[i][0] == '|')\n"
+              "            c++;\n"
+              "     }\n"
+              "    return c;\n"
+              "}", "test.c");
+        ASSERT_EQUALS("", errout.str());
     }
 
     void array_index_for_continue() {
@@ -4539,22 +4552,23 @@ private:
         ASSERT_EQUALS("[test.cpp:3]: (portability) Undefined behaviour, pointer arithmetic 'arr+20' is out of bounds.\n", errout.str());
     }
 
-    void ctu(const char code[]) {
+#define ctu(code) ctu_(code, __FILE__, __LINE__)
+    void ctu_(const char code[], const char* file, int line) {
         // Clear the error buffer..
         errout.str("");
 
         // Tokenize..
         Tokenizer tokenizer(&settings0, this);
         std::istringstream istr(code);
-        tokenizer.tokenize(istr, "test.cpp");
+        ASSERT_LOC(tokenizer.tokenize(istr, "test.cpp"), file, line);
 
         CTU::FileInfo *ctu = CTU::getFileInfo(&tokenizer);
 
         // Check code..
         std::list<Check::FileInfo*> fileInfo;
-        CheckBufferOverrun check(&tokenizer, &settings0, this);
-        fileInfo.push_back(check.getFileInfo(&tokenizer, &settings0));
-        check.analyseWholeProgram(ctu, fileInfo, settings0, *this);
+        CheckBufferOverrun checkBO(&tokenizer, &settings0, this);
+        fileInfo.push_back(checkBO.getFileInfo(&tokenizer, &settings0));
+        checkBO.analyseWholeProgram(ctu, fileInfo, settings0, *this);
         while (!fileInfo.empty()) {
             delete fileInfo.back();
             fileInfo.pop_back();
