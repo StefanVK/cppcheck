@@ -1503,6 +1503,8 @@ void CheckOther::checkConstPointer()
             continue;
         if (tok->valueType()->pointer == 0 || tok->valueType()->constness > 0)
             continue;
+        if (tok->valueType()->reference != Reference::None)
+          continue;
         if (nonConstPointers.find(tok->variable()) != nonConstPointers.end())
             continue;
         pointers.insert(tok->variable());

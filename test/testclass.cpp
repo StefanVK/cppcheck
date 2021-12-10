@@ -36,6 +36,8 @@ private:
     void run() OVERRIDE {
         settings0.severity.enable(Severity::style);
         settings1.severity.enable(Severity::warning);
+        settings1.debugnormal = true;
+        settings1.debugSimplified = true;
 
         // Load std.cfg configuration
         {

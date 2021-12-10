@@ -2758,14 +2758,14 @@ bool Tokenizer::simplifyTokens1(const std::string &configuration)
         list.createAst();
         list.validateAst();
     }
-
+    printDebugOutput(1);
     if (mTimerResults) {
         Timer t("Tokenizer::simplifyTokens1::createSymbolDatabase", mSettings->showtime, mTimerResults);
         createSymbolDatabase();
     } else {
         createSymbolDatabase();
     }
-
+    printDebugOutput(1);
     if (mTimerResults) {
         Timer t("Tokenizer::simplifyTokens1::setValueType", mSettings->showtime, mTimerResults);
         mSymbolDatabase->setValueTypeInTokenList(true);
@@ -7501,6 +7501,8 @@ void Tokenizer::simplifyVarDecl(Token * tokBegin, const Token * const tokEnd, co
         }
 
         else {
+//            if (Token::simpleMatch(type0, "auto"))
+//              continue;
             Token *eq = tok2;
 
             while (tok2) {

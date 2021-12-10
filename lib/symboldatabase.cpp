@@ -67,11 +67,15 @@ SymbolDatabase::SymbolDatabase(const Tokenizer *tokenizer, const Settings *setti
     createSymbolDatabaseVariableSymbolTable();
     createSymbolDatabaseSetScopePointers();
     createSymbolDatabaseSetVariablePointers();
-    setValueTypeInTokenList(false);
+    printOut("Test1");
+    setValueTypeInTokenList(true); // Problem
+    printOut("Test2");
     createSymbolDatabaseSetTypePointers();
     createSymbolDatabaseSetFunctionPointers(true);
     createSymbolDatabaseSetSmartPointerType();
+    printOut("Test3");
     setValueTypeInTokenList(false);
+    printOut("Test4");
     createSymbolDatabaseEnums();
     createSymbolDatabaseEscapeFunctions();
     createSymbolDatabaseIncompleteVars();
@@ -5972,6 +5976,7 @@ void SymbolDatabase::setValueType(Token *tok, const ValueType &valuetype)
         Token::simpleMatch(parent->astParent()->astOperand1(), "for")) {
         const bool isconst = Token::simpleMatch(parent->astParent()->next(), "const");
         Token * const autoToken = parent->astParent()->tokAt(isconst ? 2 : 1);
+        const bool isreference = Token::simpleMatch(autoToken->next(), "&");
         if (vt2->pointer) {
             ValueType autovt(*vt2);
             autovt.pointer--;
@@ -6028,6 +6033,8 @@ void SymbolDatabase::setValueType(Token *tok, const ValueType &valuetype)
 
             if (setType) {
                 // Type of "auto" has been determined.. set type information for "auto" and variable tokens
+                if (isreference)
+                    autovt.reference = Reference::LValue;                
                 setValueType(autoToken, autovt);
                 setAutoTokenProperties(autoToken);
                 ValueType varvt(autovt);
@@ -6318,6 +6325,10 @@ static const Token * parsedecl(const Token *type, ValueType * const valuetype, V
                     valuetype->pointer++;
                 if (type->str() == "const")
                     valuetype->constness |= (1 << valuetype->pointer);
+                if (type->str() == "&")
+                    valuetype->reference = Reference::LValue;
+                if (type->str() == "&&")
+                    valuetype->reference = Reference::RValue;
                 type = type->next();
             }
             break;

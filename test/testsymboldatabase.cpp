@@ -122,6 +122,9 @@ private:
         // If there are unused templates, keep those
         settings1.checkUnusedTemplates = true;
         settings2.checkUnusedTemplates = true;
+        settings1.debugnormal = true;
+        settings1.debugSimplified = true;
+        settings1.debugwarnings = true;
 
         TEST_CASE(array);
         TEST_CASE(stlarray1);
@@ -478,6 +481,7 @@ private:
         TEST_CASE(auto13);
         TEST_CASE(auto14);
         TEST_CASE(auto15); // C++17 auto deduction from braced-init-list
+        TEST_CASE(auto16);
 
         TEST_CASE(unionWithConstructor);
 
@@ -8352,6 +8356,47 @@ private:
         const Variable *var2 = db->variableList()[2];
         ASSERT(var2->valueType());
         ASSERT_EQUALS(ValueType::Type::DOUBLE, var2->valueType()->type);
+    }
+
+    void auto16() {
+        GET_SYMBOL_DB("static void foo() {\n"
+                      "   int i{};\n"
+                      "   int* pi{&i}\n"
+                      "   int& ri = i;\n"
+                      "   auto v1 = i;\n"
+                      "   auto& v2 = i;\n"
+                      "   const auto& v3 = i;\n"
+                      "   auto const& v4 = i;\n"
+                      "}");
+        db->printOut();
+
+        auto str = tokenizer.tokens()->stringifyList();
+
+        const Token *tok;
+
+        tok = Token::findsimplematch(tokenizer.tokens(), "v1");
+        ASSERT(tok);
+        ASSERT(tok->valueType());
+        ASSERT(tok->valueType()->reference == Reference::None);
+        ASSERT_EQUALS(0, tok->valueType()->pointer);
+        ASSERT_EQUALS(0, tok->valueType()->constness);
+        ASSERT_EQUALS(ValueType::Type::INT, tok->valueType()->type);
+
+        tok = Token::findsimplematch(tokenizer.tokens(), "v2");
+        ASSERT(tok);
+        ASSERT(tok->valueType());
+        ASSERT(tok->valueType()->reference == Reference::LValue);
+        ASSERT_EQUALS(0, tok->valueType()->pointer);
+        ASSERT_EQUALS(0, tok->valueType()->constness);
+        ASSERT_EQUALS(ValueType::Type::INT, tok->valueType()->type);
+
+        tok = Token::findsimplematch(tokenizer.tokens(), "v3");
+        ASSERT(tok);
+        ASSERT(tok->valueType());
+        ASSERT(tok->valueType()->reference == Reference::LValue);
+        ASSERT_EQUALS(0, tok->valueType()->pointer);
+        ASSERT_EQUALS(1, tok->valueType()->constness);
+        ASSERT_EQUALS(ValueType::Type::INT, tok->valueType()->type);
     }
 
     void unionWithConstructor() {
